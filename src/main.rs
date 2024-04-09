@@ -1,8 +1,12 @@
 mod types;
 
+use crate::types::NRTM4UpdateNotificationFile;
+use anyhow::anyhow;
+use anyhow::Result;
 use clap::Parser;
-use reqwest::Error;
-use std::process;
+use serde::Deserialize;
+use sha256::digest;
+use types::NRTM4SnapshotHeader;
 use url::Url;
 use validator::Validate;
 
@@ -16,35 +20,59 @@ struct Cli {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<()> {
     let args = Cli::parse();
-    if !args
-        .update_notification_url
-        .to_string()
-        // TODO: path_segments
-        .ends_with("/update-notification-file.json")
-    {
-        println!(
-            "Error: filename of Update Notification File must be update-notification-file.json"
-        );
-        process::exit(1);
-    }
+    match args.update_notification_url.path_segments() {
+        Some(x) => {
+            if x.last().unwrap() != "update-notification-file.json" {
+                return Err(anyhow!(
+                    "Filename of Update Notification File must be update-notification-file.json"
+                ));
+            }
+        }
+        None => return Err(anyhow!("Unable to find filename in URL")),
+    };
 
-    get_request(args.update_notification_url).await?;
+    let unf: NRTM4UpdateNotificationFile = retrieve_and_validate_nrtm4_file(
+        args.update_notification_url,
+        Some(String::from(
+            "7df5d97af14faae118ef03668bcca5f9e9bad2421e619674a3d22f910b751876",
+        )),
+    )
+    .await?;
+    if unf.source != args.source {
+        return Err(anyhow!(
+            "Source does not match: Update Notification File has '{}', expecting '{}'",
+            unf.source,
+            args.source
+        ));
+    }
+    let snapshot: NRTM4SnapshotHeader =
+        retrieve_and_validate_nrtm4_file(unf.snapshot.url, Some(unf.snapshot.hash)).await?;
     Ok(())
 }
 
-async fn get_request(url: Url) -> Result<(), Error> {
-    let response = reqwest::get(url).await?;
-    println!("Status: {}", response.status());
-
+async fn retrieve_and_validate_nrtm4_file<T: for<'a> Deserialize<'a> + Validate>(
+    url: Url,
+    expected_hash: Option<String>,
+) -> Result<T> {
+    let response = reqwest::get(url.clone()).await?;
     let body = response.text().await?;
-    println!("Body size:\n{}", body.len());
-
-    let update_notification_file: types::NRTM4UpdateNotificationFile =
-        serde_json::from_str(&body).unwrap();
-    let x = update_notification_file.validate();
-    println!("{:#?}", x);
-
-    Ok(())
+    match expected_hash {
+        Some(hash) => {
+            if digest(&body) != hash {
+                return Err(anyhow!(
+                    "Invalid hash for URL {}: expected {} but found {} for body len {}",
+                    url,
+                    hash,
+                    digest(&body),
+                    body.len()
+                ));
+            }
+        }
+        None => (),
+    };
+    let nrtm4_struct: T = serde_json::from_str(&body)?;
+    nrtm4_struct.validate()?;
+    Ok(nrtm4_struct)
 }
