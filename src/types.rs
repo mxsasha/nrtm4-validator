@@ -4,6 +4,18 @@ use url::Url;
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
 
+#[derive(Debug)]
+pub struct NRTM4SnapshotFile {
+    pub header: NRTM4SnapshotHeader,
+    pub entries: Vec<NRTM4SnapshotEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NRTM4SnapshotHeaderType {
+    Snapshot,
+}
+
 #[derive(Debug, Serialize, Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 pub struct NRTM4SnapshotHeader {
@@ -13,7 +25,25 @@ pub struct NRTM4SnapshotHeader {
     pub session_id: Uuid,
     pub version: u32,
     #[serde(rename = "type")]
-    pub header_type: String,
+    pub header_type: NRTM4SnapshotHeaderType,
+}
+
+#[derive(Debug, Serialize, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct NRTM4SnapshotEntry {
+    pub object: String,
+}
+
+#[derive(Debug)]
+pub struct NRTM4DeltaFile {
+    pub header: NRTM4DeltaHeader,
+    pub entries: Vec<NRTM4DeltaEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NRTM4DeltaHeaderType {
+    Delta,
 }
 
 #[derive(Debug, Serialize, Deserialize, Validate)]
@@ -25,8 +55,28 @@ pub struct NRTM4DeltaHeader {
     pub session_id: Uuid,
     pub version: u32,
     #[serde(rename = "type")]
-    pub header_type: String,
+    pub header_type: NRTM4DeltaHeaderType,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "action")]
+#[serde(rename_all = "snake_case")]
+pub enum NRTM4DeltaEntry {
+    AddModify {
+        object: String,
+    },
+    Delete {
+        object_class: String,
+        primary_key: String,
+    },
+}
+
+// #[derive(Debug, Serialize, Deserialize, Validate)]
+// #[serde(deny_unknown_fields)]
+// pub struct NRTM4DeltaEntry {
+//     pub action: NRTM4DeltaEntryAction,
+
+// }
 
 #[derive(Debug, Serialize, Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
