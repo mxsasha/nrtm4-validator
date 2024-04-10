@@ -17,6 +17,9 @@ use types::NRTM4SnapshotHeader;
 use types::NRTM4UpdateNotificationFile;
 use url::Url;
 use validator::Validate;
+
+static APP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
+
 /// Validate an NRTMv4 server
 #[derive(clap::Parser)]
 struct Cli {
@@ -199,7 +202,10 @@ async fn retrieve_jsonseq(
 }
 
 async fn retrieve_bytes(url: Url, expected_hash: Option<String>) -> Result<Vec<u8>> {
-    let response = reqwest::get(url.clone()).await?;
+    let client = reqwest::Client::builder()
+        .user_agent(APP_USER_AGENT)
+        .build()?;
+    let response = client.get(url.clone()).send().await?;
     let body = response.bytes().await?;
     let response_bytes = body.into_iter().collect();
     if let Some(hash) = expected_hash {

@@ -134,7 +134,7 @@ fn validate_unf(unf: &NRTM4UpdateNotificationFile) -> Result<(), ValidationError
     }
     Ok(())
 }
-
+// TODO: timestamp, delta v1, next key, type field in UNF
 fn is_contiguous_and_ordered(numbers: &[u32]) -> bool {
     if numbers.is_empty() {
         return true;
