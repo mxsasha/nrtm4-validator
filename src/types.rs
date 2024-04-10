@@ -89,6 +89,7 @@ pub struct NRTM4FileReference {
 
 #[derive(Debug, Serialize, Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
+#[validate(schema(function = "validate_unf"))]
 pub struct NRTM4UpdateNotificationFile {
     #[validate(range(min = 4, max = 4))]
     pub nrtm_version: u8,
@@ -110,4 +111,33 @@ fn validate_url(url: &Url) -> Result<(), ValidationError> {
         return Err(ValidationError::new("Invalid URL scheme"));
     }
     Ok(())
+}
+
+fn validate_unf(unf: &NRTM4UpdateNotificationFile) -> Result<(), ValidationError> {
+    if unf.snapshot.version > unf.version {
+        return Err(ValidationError::new(
+            "Snapshot version can not be higher than Update Notification File version",
+        ));
+    }
+    let delta_versions: Vec<u32> = unf.deltas.iter().map(|delta| delta.version).collect();
+    if !is_contiguous_and_ordered(&delta_versions) {
+        return Err(ValidationError::new(
+            "Delta versions must be sequential contiguous set of version numbers",
+        ));
+    }
+    if let Some(highest_delta_version) = delta_versions.last() {
+        if *highest_delta_version > unf.version {
+            return Err(ValidationError::new(
+                "Delta version can not be higher than Update Notification File version",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn is_contiguous_and_ordered(numbers: &[u32]) -> bool {
+    if numbers.is_empty() {
+        return true;
+    }
+    numbers.windows(2).all(|window| window[1] == window[0] + 1)
 }
