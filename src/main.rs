@@ -3,7 +3,10 @@ mod types;
 
 use anyhow::anyhow;
 use anyhow::Result;
+use base64::prelude::*;
 use clap::Parser;
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use jsonseq::{gunzip, JSONSequenceIterator};
 use sha256::digest;
 use types::NRTM4DeltaEntry;
 use types::NRTM4DeltaFile;
@@ -14,9 +17,6 @@ use types::NRTM4SnapshotHeader;
 use types::NRTM4UpdateNotificationFile;
 use url::Url;
 use validator::Validate;
-
-use jsonseq::{gunzip, JSONSequenceIterator};
-
 /// Validate an NRTMv4 server
 #[derive(clap::Parser)]
 struct Cli {
@@ -24,6 +24,17 @@ struct Cli {
     update_notification_url: Url,
     /// Name of the IRR source
     source: String,
+    /// Public key in base64
+    #[arg(value_parser = parse_public_key)]
+    public_key: VerifyingKey,
+}
+
+fn parse_public_key(public_key_str: &str) -> Result<VerifyingKey> {
+    let key_bytes: [u8; 32] = BASE64_STANDARD
+        .decode(public_key_str)?
+        .as_slice()
+        .try_into()?;
+    Ok(VerifyingKey::from_bytes(&key_bytes)?)
 }
 
 #[tokio::main]
@@ -40,7 +51,7 @@ async fn main() -> Result<()> {
         None => return Err(anyhow!("Unable to find filename in URL")),
     };
 
-    let unf = retrieve_nrtm4_unf(args.update_notification_url, None).await?;
+    let unf = retrieve_nrtm4_unf(args.update_notification_url, args.public_key).await?;
     if unf.source != args.source {
         return Err(anyhow!(
             "Source does not match: Update Notification File has '{}', expecting '{}'",
@@ -100,16 +111,34 @@ fn check_consistency<T: PartialEq + std::fmt::Display>(
     }
     Ok(())
 }
-// async fn retrieve_and_validate_nrtm4_file<T: for<'a> Deserialize<'a> + Validate>(
+
 async fn retrieve_nrtm4_unf(
     url: Url,
-    expected_hash: Option<String>,
+    public_key: VerifyingKey,
 ) -> Result<NRTM4UpdateNotificationFile> {
     println!(
         "Retrieving and validating Update Notification File from {}",
         url
     );
-    let response_bytes = retrieve_bytes(url.clone(), expected_hash).await?;
+    let response_bytes = retrieve_bytes(url.clone(), None).await?;
+    let response_hash = digest(&response_bytes);
+    let mut signature_url = url.to_string().replace(
+        "update-notification-file.json",
+        &format!(
+            "update-notification-file-signature-{}.sig",
+            response_hash.as_str()
+        ),
+    );
+    if url.to_string().contains("nrtm.db.ripe.net") {
+        signature_url = url.to_string();
+        signature_url.push_str(".sig");
+    }
+    let signature_response_str = retrieve_bytes(Url::parse(&signature_url)?, None).await?;
+    let signature_bytes: [u8; 64] = BASE64_STANDARD
+        .decode(signature_response_str)?
+        .as_slice()
+        .try_into()?;
+    public_key.verify(&response_bytes, &Signature::from_bytes(&signature_bytes))?;
     let nrtm4_struct: NRTM4UpdateNotificationFile =
         serde_json::from_str(&String::from_utf8_lossy(&response_bytes))?;
     nrtm4_struct.validate()?;
