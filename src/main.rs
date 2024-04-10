@@ -157,12 +157,11 @@ async fn retrieve_jsonseq(
 ) -> Result<(String, JSONSequenceIterator)> {
     println!("Retrieving and validating {}", url);
     let response_bytes = retrieve_bytes(url.clone(), expected_hash).await?;
-    let uncompressed_response: Vec<u8>;
-    if url.as_str().ends_with(".gz") {
-        uncompressed_response = gunzip(response_bytes)?;
+    let uncompressed_response = if url.as_str().ends_with(".gz") {
+        gunzip(response_bytes)?
     } else {
-        uncompressed_response = response_bytes;
-    }
+        response_bytes
+    };
     let mut iter = JSONSequenceIterator::new(uncompressed_response);
     let header_content: String = iter
         .next()
