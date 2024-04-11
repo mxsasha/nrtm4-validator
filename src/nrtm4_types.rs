@@ -1,11 +1,17 @@
+use crate::crypto::parse_public_key;
 use anyhow::anyhow;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use once_cell::sync::Lazy;
+use regex::Regex;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use url::Url;
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
+
+static RE_RPSL_NAME: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^[A-Za-z][A-Za-z0-9_-]*[A-Za-z0-9]$").unwrap());
 
 pub trait NRTM4File {
     type Header;
@@ -163,8 +169,8 @@ pub struct NRTM4FileReference {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum NRTM4SnapshotFileType {
-    Snapshot,
+pub enum NRTM4UpdateNotificationFileType {
+    Notification,
 }
 
 #[derive(Debug, Serialize, Deserialize, Validate)]
@@ -173,22 +179,31 @@ pub enum NRTM4SnapshotFileType {
 pub struct NRTM4UpdateNotificationFile {
     #[validate(range(min = 4, max = 4))]
     pub nrtm_version: u8,
+    #[validate(regex(path = "*RE_RPSL_NAME"))]
     pub source: String,
     pub session_id: Uuid,
     pub version: u32,
     pub timestamp: DateTime<Utc>,
     #[serde(rename = "type")]
-    pub file_type: NRTM4SnapshotFileType,
+    pub file_type: NRTM4UpdateNotificationFileType,
     #[validate(nested)]
     pub snapshot: NRTM4FileReference,
     #[validate(nested)]
     pub deltas: Vec<NRTM4FileReference>,
+    #[validate(custom(function = "validate_signing_key"))]
     pub next_signing_key: Option<String>,
 }
 
 fn validate_url(url: &Url) -> Result<(), ValidationError> {
     if url.scheme() != "https" {
         return Err(ValidationError::new("Invalid URL scheme"));
+    }
+    Ok(())
+}
+
+fn validate_signing_key(signing_key: &str) -> Result<(), ValidationError> {
+    if parse_public_key(signing_key).is_err() {
+        return Err(ValidationError::new("Invalid public key"));
     }
     Ok(())
 }
@@ -214,7 +229,7 @@ fn validate_unf(unf: &NRTM4UpdateNotificationFile) -> Result<(), ValidationError
     }
     Ok(())
 }
-// TODO: timestamp, next key, IRR object name
+// TODO: timestamp,
 fn is_contiguous_and_ordered(numbers: &[u32]) -> bool {
     if numbers.is_empty() {
         return true;

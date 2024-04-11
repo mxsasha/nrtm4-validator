@@ -849,6 +849,8 @@ dependencies = [
  "clap",
  "ed25519-dalek",
  "flate2",
+ "once_cell",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
