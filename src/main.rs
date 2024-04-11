@@ -19,6 +19,7 @@ use validator::Validate;
 #[derive(clap::Parser)]
 struct Cli {
     /// URL to the update notification file
+    #[arg(value_parser = parse_update_notification_url)]
     update_notification_url: Url,
     /// Name of the IRR source
     source: String,
@@ -35,10 +36,9 @@ fn parse_public_key(public_key_str: &str) -> Result<VerifyingKey> {
     Ok(VerifyingKey::from_bytes(&key_bytes)?)
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Cli::parse();
-    match args.update_notification_url.path_segments() {
+fn parse_update_notification_url(update_notification_url: &str) -> Result<Url> {
+    let url: Url = Url::parse(update_notification_url)?;
+    match url.path_segments() {
         Some(x) => {
             if x.last().unwrap() != "update-notification-file.json" {
                 return Err(anyhow!(
@@ -48,34 +48,46 @@ async fn main() -> Result<()> {
         }
         None => return Err(anyhow!("Unable to find filename in URL")),
     };
+    Ok(url)
+}
 
-    let unf = retrieve_nrtm4_unf(args.update_notification_url, args.public_key).await?;
-    if unf.source != args.source {
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Cli::parse();
+    load_nrtm4(args.update_notification_url, &args.public_key, &args.source).await?;
+    Ok(())
+}
+
+async fn load_nrtm4(
+    update_notification_url: Url,
+    public_key: &VerifyingKey,
+    source: &str,
+) -> Result<NRTM4UpdateNotificationFile> {
+    let unf = retrieve_nrtm4_unf(update_notification_url, public_key).await?;
+    if unf.source != source {
         return Err(anyhow!(
             "Source does not match: Update Notification File has '{}', expecting '{}'",
             unf.source,
-            args.source
+            source
         ));
     }
     let (header_content, jsonseq_iter) =
         retrieve_jsonseq(unf.snapshot.url.clone(), Some(&unf.snapshot.hash)).await?;
     let snapshot = NRTM4SnapshotFile::from_header_and_records(header_content, jsonseq_iter)?;
-    println!("Snapshot header: {:?}", snapshot.header);
     snapshot.validate_unf_consistency(&unf)?;
 
     for delta_reference in unf.deltas.iter() {
         let (header_content, jsonseq_iter) =
             retrieve_jsonseq(delta_reference.url.clone(), Some(&delta_reference.hash)).await?;
         let delta = NRTM4DeltaFile::from_header_and_records(header_content, jsonseq_iter)?;
-        println!("Delta header: {:?}", delta.header);
         delta.validate_unf_consistency(&unf, delta_reference.version)?;
     }
-    Ok(())
+    Ok(unf)
 }
 
 async fn retrieve_nrtm4_unf(
     url: Url,
-    public_key: VerifyingKey,
+    public_key: &VerifyingKey,
 ) -> Result<NRTM4UpdateNotificationFile> {
     println!(
         "Retrieving and validating Update Notification File from {}",
