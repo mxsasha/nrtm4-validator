@@ -2,13 +2,9 @@ mod jsonseq;
 mod nrtm4_types;
 mod retrieval;
 
-use crate::nrtm4_types::NRTM4DeltaEntry;
-use crate::nrtm4_types::NRTM4DeltaFile;
-use crate::nrtm4_types::NRTM4DeltaHeader;
-use crate::nrtm4_types::NRTM4SnapshotEntry;
-use crate::nrtm4_types::NRTM4SnapshotFile;
-use crate::nrtm4_types::NRTM4SnapshotHeader;
-use crate::nrtm4_types::NRTM4UpdateNotificationFile;
+use crate::nrtm4_types::{
+    NRTM4DeltaFile, NRTM4File, NRTM4SnapshotFile, NRTM4UpdateNotificationFile,
+};
 use crate::retrieval::{retrieve_bytes, retrieve_jsonseq};
 use anyhow::anyhow;
 use anyhow::Result;
@@ -61,14 +57,14 @@ async fn main() -> Result<()> {
             args.source
         ));
     }
-    let snapshot =
-        retrieve_nrtm4_snapshot(unf.snapshot.url.clone(), Some(&unf.snapshot.hash)).await?;
+    let snapshot: NRTM4SnapshotFile =
+        retrieve_nrtm4_file(unf.snapshot.url.clone(), Some(&unf.snapshot.hash)).await?;
     println!("Snapshot header: {:?}", snapshot.header);
     snapshot.validate_unf_consistency(&unf)?;
 
     for delta_reference in unf.deltas.iter() {
-        let delta =
-            retrieve_nrtm4_delta(delta_reference.url.clone(), Some(&delta_reference.hash)).await?;
+        let delta: NRTM4DeltaFile =
+            retrieve_nrtm4_file(delta_reference.url.clone(), Some(&delta_reference.hash)).await?;
         println!("Delta header: {:?}", delta.header);
         delta.validate_unf_consistency(&unf, delta_reference.version)?;
     }
@@ -107,56 +103,7 @@ async fn retrieve_nrtm4_unf(
     Ok(nrtm4_struct)
 }
 
-async fn retrieve_nrtm4_delta(url: Url, expected_hash: Option<&String>) -> Result<NRTM4DeltaFile> {
+async fn retrieve_nrtm4_file<T: NRTM4File>(url: Url, expected_hash: Option<&String>) -> Result<T> {
     let (header_content, jsonseq_iter) = retrieve_jsonseq(url, expected_hash).await?;
-    let header: NRTM4DeltaHeader = serde_json::from_str(&header_content)?;
-    header.validate()?;
-    let entries: Result<Vec<NRTM4DeltaEntry>> = jsonseq_iter
-        .map(|record| {
-            let record_content: String = record?;
-            Ok(serde_json::from_str(&record_content)?)
-        })
-        .collect();
-    Ok(NRTM4DeltaFile {
-        header,
-        entries: entries?,
-    })
-}
-
-// async fn retrieve_nrtm4_snapshot(
-//     url: Url,
-//     expected_hash: Option<&String>,
-// ) -> Result<NRTM4SnapshotFile> {
-//     let (header_content, jsonseq_iter) = retrieve_jsonseq(url, expected_hash).await?;
-//     let header: NRTM4SnapshotHeader = serde_json::from_str(&header_content)?;
-//     header.validate()?;
-//     let entries: Result<Vec<NRTM4SnapshotEntry>> = jsonseq_iter
-//         .map(|record| {
-//             let record_content: String = record?;
-//             Ok(serde_json::from_str(&record_content)?)
-//         })
-//         .collect();
-//     Ok(NRTM4SnapshotFile {
-//         header,
-//         entries: entries?,
-//     })
-// }
-
-async fn retrieve_nrtm4_snapshot(
-    url: Url,
-    expected_hash: Option<&String>,
-) -> Result<NRTM4SnapshotFile> {
-    let (header_content, jsonseq_iter) = retrieve_jsonseq(url, expected_hash).await?;
-    let header: NRTM4SnapshotHeader = serde_json::from_str(&header_content)?;
-    header.validate()?;
-    let entries: Result<Vec<NRTM4SnapshotEntry>> = jsonseq_iter
-        .map(|record| {
-            let record_content: String = record?;
-            Ok(serde_json::from_str(&record_content)?)
-        })
-        .collect();
-    Ok(NRTM4SnapshotFile {
-        header,
-        entries: entries?,
-    })
+    T::from_header_and_records(header_content, jsonseq_iter)
 }
