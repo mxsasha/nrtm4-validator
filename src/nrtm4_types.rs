@@ -1,18 +1,36 @@
 use anyhow::anyhow;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use url::Url;
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
 
 pub trait NRTM4File {
+    type Header;
+    type Entry;
+
     fn from_header_and_records<T: Iterator<Item = Result<String>>>(
         header_content: String,
         record_iter: T,
     ) -> Result<Self>
     where
-        Self: Sized;
+        Self: Sized,
+        Self::Header: DeserializeOwned + Validate,
+        Self::Entry: DeserializeOwned,
+    {
+        let header: Self::Header = serde_json::from_str(&header_content)?;
+        header.validate()?;
+        let entries: Result<Vec<Self::Entry>> = record_iter
+            .map(|record| {
+                let record_content: String = record?;
+                Ok(serde_json::from_str(&record_content)?)
+            })
+            .collect();
+        Ok(Self::new(header, entries?))
+    }
+    fn new(header: Self::Header, entries: Vec<Self::Entry>) -> Self;
 }
 
 #[derive(Debug)]
@@ -52,22 +70,10 @@ pub struct NRTM4DeltaFile {
 }
 
 impl NRTM4File for NRTM4SnapshotFile {
-    fn from_header_and_records<T: Iterator<Item = Result<String>>>(
-        header_content: String,
-        record_iter: T,
-    ) -> Result<Self> {
-        let header: NRTM4SnapshotHeader = serde_json::from_str(&header_content)?;
-        header.validate()?;
-        let entries: Result<Vec<NRTM4SnapshotEntry>> = record_iter
-            .map(|record| {
-                let record_content: String = record?;
-                Ok(serde_json::from_str(&record_content)?)
-            })
-            .collect();
-        Ok(Self {
-            header,
-            entries: entries?,
-        })
+    type Header = NRTM4SnapshotHeader;
+    type Entry = NRTM4SnapshotEntry;
+    fn new(header: Self::Header, entries: Vec<Self::Entry>) -> Self {
+        Self { header, entries }
     }
 }
 impl NRTM4SnapshotFile {
@@ -121,22 +127,10 @@ pub enum NRTM4DeltaEntry {
 }
 
 impl NRTM4File for NRTM4DeltaFile {
-    fn from_header_and_records<T: Iterator<Item = Result<String>>>(
-        header_content: String,
-        record_iter: T,
-    ) -> Result<Self> {
-        let header: NRTM4DeltaHeader = serde_json::from_str(&header_content)?;
-        header.validate()?;
-        let entries: Result<Vec<NRTM4DeltaEntry>> = record_iter
-            .map(|record| {
-                let record_content: String = record?;
-                Ok(serde_json::from_str(&record_content)?)
-            })
-            .collect();
-        Ok(Self {
-            header,
-            entries: entries?,
-        })
+    type Header = NRTM4DeltaHeader;
+    type Entry = NRTM4DeltaEntry;
+    fn new(header: Self::Header, entries: Vec<Self::Entry>) -> Self {
+        Self { header, entries }
     }
 }
 impl NRTM4DeltaFile {

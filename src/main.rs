@@ -57,14 +57,16 @@ async fn main() -> Result<()> {
             args.source
         ));
     }
-    let snapshot: NRTM4SnapshotFile =
-        retrieve_nrtm4_file(unf.snapshot.url.clone(), Some(&unf.snapshot.hash)).await?;
+    let (header_content, jsonseq_iter) =
+        retrieve_jsonseq(unf.snapshot.url.clone(), Some(&unf.snapshot.hash)).await?;
+    let snapshot = NRTM4SnapshotFile::from_header_and_records(header_content, jsonseq_iter)?;
     println!("Snapshot header: {:?}", snapshot.header);
     snapshot.validate_unf_consistency(&unf)?;
 
     for delta_reference in unf.deltas.iter() {
-        let delta: NRTM4DeltaFile =
-            retrieve_nrtm4_file(delta_reference.url.clone(), Some(&delta_reference.hash)).await?;
+        let (header_content, jsonseq_iter) =
+            retrieve_jsonseq(delta_reference.url.clone(), Some(&delta_reference.hash)).await?;
+        let delta = NRTM4DeltaFile::from_header_and_records(header_content, jsonseq_iter)?;
         println!("Delta header: {:?}", delta.header);
         delta.validate_unf_consistency(&unf, delta_reference.version)?;
     }
@@ -101,9 +103,4 @@ async fn retrieve_nrtm4_unf(
         serde_json::from_str(&String::from_utf8_lossy(&response_bytes))?;
     nrtm4_struct.validate()?;
     Ok(nrtm4_struct)
-}
-
-async fn retrieve_nrtm4_file<T: NRTM4File>(url: Url, expected_hash: Option<&String>) -> Result<T> {
-    let (header_content, jsonseq_iter) = retrieve_jsonseq(url, expected_hash).await?;
-    T::from_header_and_records(header_content, jsonseq_iter)
 }
