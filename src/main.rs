@@ -1,24 +1,23 @@
 mod jsonseq;
-mod types;
+mod nrtm4_types;
+mod retrieval;
 
+use crate::nrtm4_types::NRTM4DeltaEntry;
+use crate::nrtm4_types::NRTM4DeltaFile;
+use crate::nrtm4_types::NRTM4DeltaHeader;
+use crate::nrtm4_types::NRTM4SnapshotEntry;
+use crate::nrtm4_types::NRTM4SnapshotFile;
+use crate::nrtm4_types::NRTM4SnapshotHeader;
+use crate::nrtm4_types::NRTM4UpdateNotificationFile;
+use crate::retrieval::{retrieve_bytes, retrieve_jsonseq};
 use anyhow::anyhow;
 use anyhow::Result;
 use base64::prelude::*;
 use clap::Parser;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use jsonseq::{gunzip, JSONSequenceIterator};
 use sha256::digest;
-use types::NRTM4DeltaEntry;
-use types::NRTM4DeltaFile;
-use types::NRTM4DeltaHeader;
-use types::NRTM4SnapshotEntry;
-use types::NRTM4SnapshotFile;
-use types::NRTM4SnapshotHeader;
-use types::NRTM4UpdateNotificationFile;
 use url::Url;
 use validator::Validate;
-
-static APP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
 /// Validate an NRTMv4 server
 #[derive(clap::Parser)]
@@ -62,55 +61,16 @@ async fn main() -> Result<()> {
             args.source
         ));
     }
-    for delta_reference in unf.deltas {
-        let delta = retrieve_nrtm4_delta(delta_reference.url, Some(delta_reference.hash)).await?;
-        println!("Delta header: {:?}", delta.header);
-        check_consistency(&delta.header.source, &unf.source, "soure", "Delta")?;
-        check_consistency(
-            &delta.header.session_id,
-            &unf.session_id,
-            "session_id",
-            "Delta",
-        )?;
-        check_consistency(
-            &delta.header.version,
-            &delta_reference.version,
-            "version",
-            "Delta",
-        )?;
-    }
-    let snapshot = retrieve_nrtm4_snapshot(unf.snapshot.url, Some(unf.snapshot.hash)).await?;
+    let snapshot =
+        retrieve_nrtm4_snapshot(unf.snapshot.url.clone(), Some(&unf.snapshot.hash)).await?;
     println!("Snapshot header: {:?}", snapshot.header);
-    check_consistency(&snapshot.header.source, &unf.source, "soure", "Snapshot")?;
-    check_consistency(
-        &snapshot.header.session_id,
-        &unf.session_id,
-        "session_id",
-        "Snapshot",
-    )?;
-    check_consistency(
-        &snapshot.header.version,
-        &unf.snapshot.version,
-        "version",
-        "Snapshot",
-    )?;
-    Ok(())
-}
+    snapshot.validate_unf_consistency(&unf)?;
 
-fn check_consistency<T: PartialEq + std::fmt::Display>(
-    in_subfile: &T,
-    in_unf: &T,
-    field_human_name: &str,
-    file_human_name: &str,
-) -> Result<()> {
-    if in_subfile != in_unf {
-        return Err(anyhow!(
-            "{} does not match: {} File has '{}', expecting '{}'",
-            field_human_name,
-            file_human_name,
-            in_subfile,
-            in_unf,
-        ));
+    for delta_reference in unf.deltas.iter() {
+        let delta =
+            retrieve_nrtm4_delta(delta_reference.url.clone(), Some(&delta_reference.hash)).await?;
+        println!("Delta header: {:?}", delta.header);
+        delta.validate_unf_consistency(&unf, delta_reference.version)?;
     }
     Ok(())
 }
@@ -124,12 +84,11 @@ async fn retrieve_nrtm4_unf(
         url
     );
     let response_bytes = retrieve_bytes(url.clone(), None).await?;
-    let response_hash = digest(&response_bytes);
     let mut signature_url = url.to_string().replace(
         "update-notification-file.json",
         &format!(
             "update-notification-file-signature-{}.sig",
-            response_hash.as_str()
+            digest(&response_bytes).as_str()
         ),
     );
     if url.to_string().contains("nrtm.db.ripe.net") {
@@ -148,7 +107,7 @@ async fn retrieve_nrtm4_unf(
     Ok(nrtm4_struct)
 }
 
-async fn retrieve_nrtm4_delta(url: Url, expected_hash: Option<String>) -> Result<NRTM4DeltaFile> {
+async fn retrieve_nrtm4_delta(url: Url, expected_hash: Option<&String>) -> Result<NRTM4DeltaFile> {
     let (header_content, jsonseq_iter) = retrieve_jsonseq(url, expected_hash).await?;
     let header: NRTM4DeltaHeader = serde_json::from_str(&header_content)?;
     header.validate()?;
@@ -164,9 +123,28 @@ async fn retrieve_nrtm4_delta(url: Url, expected_hash: Option<String>) -> Result
     })
 }
 
+// async fn retrieve_nrtm4_snapshot(
+//     url: Url,
+//     expected_hash: Option<&String>,
+// ) -> Result<NRTM4SnapshotFile> {
+//     let (header_content, jsonseq_iter) = retrieve_jsonseq(url, expected_hash).await?;
+//     let header: NRTM4SnapshotHeader = serde_json::from_str(&header_content)?;
+//     header.validate()?;
+//     let entries: Result<Vec<NRTM4SnapshotEntry>> = jsonseq_iter
+//         .map(|record| {
+//             let record_content: String = record?;
+//             Ok(serde_json::from_str(&record_content)?)
+//         })
+//         .collect();
+//     Ok(NRTM4SnapshotFile {
+//         header,
+//         entries: entries?,
+//     })
+// }
+
 async fn retrieve_nrtm4_snapshot(
     url: Url,
-    expected_hash: Option<String>,
+    expected_hash: Option<&String>,
 ) -> Result<NRTM4SnapshotFile> {
     let (header_content, jsonseq_iter) = retrieve_jsonseq(url, expected_hash).await?;
     let header: NRTM4SnapshotHeader = serde_json::from_str(&header_content)?;
@@ -181,37 +159,4 @@ async fn retrieve_nrtm4_snapshot(
         header,
         entries: entries?,
     })
-}
-
-async fn retrieve_jsonseq(
-    url: Url,
-    expected_hash: Option<String>,
-) -> Result<(String, JSONSequenceIterator)> {
-    println!("Retrieving and validating {}", url);
-    let response_bytes = retrieve_bytes(url.clone(), expected_hash).await?;
-    let uncompressed_response = if url.as_str().ends_with(".gz") {
-        gunzip(response_bytes)?
-    } else {
-        response_bytes
-    };
-    let mut iter = JSONSequenceIterator::new(uncompressed_response);
-    let header_content: String = iter
-        .next()
-        .unwrap_or_else(|| Err(anyhow!("No header found")))?;
-    Ok((header_content, iter))
-}
-
-async fn retrieve_bytes(url: Url, expected_hash: Option<String>) -> Result<Vec<u8>> {
-    let client = reqwest::Client::builder()
-        .user_agent(APP_USER_AGENT)
-        .build()?;
-    let response = client.get(url.clone()).send().await?;
-    let body = response.bytes().await?;
-    let response_bytes = body.into_iter().collect();
-    if let Some(hash) = expected_hash {
-        if digest(&response_bytes) != hash {
-            return Err(anyhow!("Invalid hash for URL {}", url));
-        }
-    }
-    Ok(response_bytes)
 }
