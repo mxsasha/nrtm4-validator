@@ -1,16 +1,17 @@
+mod crypto;
 mod jsonseq;
 mod nrtm4_types;
 mod retrieval;
 
+use crate::crypto::{check_signature, parse_public_key};
 use crate::nrtm4_types::{
     NRTM4DeltaFile, NRTM4File, NRTM4SnapshotFile, NRTM4UpdateNotificationFile,
 };
 use crate::retrieval::{retrieve_bytes, retrieve_jsonseq};
 use anyhow::anyhow;
 use anyhow::Result;
-use base64::prelude::*;
 use clap::Parser;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::VerifyingKey;
 use sha256::digest;
 use url::Url;
 use validator::Validate;
@@ -26,14 +27,6 @@ struct Cli {
     /// Public key in base64
     #[arg(value_parser = parse_public_key)]
     public_key: VerifyingKey,
-}
-
-fn parse_public_key(public_key_str: &str) -> Result<VerifyingKey> {
-    let key_bytes: [u8; 32] = BASE64_STANDARD
-        .decode(public_key_str)?
-        .as_slice()
-        .try_into()?;
-    Ok(VerifyingKey::from_bytes(&key_bytes)?)
 }
 
 fn parse_update_notification_url(update_notification_url: &str) -> Result<Url> {
@@ -106,11 +99,7 @@ async fn retrieve_nrtm4_unf(
         signature_url.push_str(".sig");
     }
     let signature_response_str = retrieve_bytes(Url::parse(&signature_url)?, None).await?;
-    let signature_bytes: [u8; 64] = BASE64_STANDARD
-        .decode(signature_response_str)?
-        .as_slice()
-        .try_into()?;
-    public_key.verify(&response_bytes, &Signature::from_bytes(&signature_bytes))?;
+    check_signature(public_key, &response_bytes, &signature_response_str)?;
     let nrtm4_struct: NRTM4UpdateNotificationFile =
         serde_json::from_str(&String::from_utf8_lossy(&response_bytes))?;
     nrtm4_struct.validate()?;

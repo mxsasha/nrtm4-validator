@@ -154,10 +154,17 @@ impl NRTM4DeltaFile {
 #[derive(Debug, Serialize, Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 pub struct NRTM4FileReference {
+    #[validate(range(min = 2))]
     pub version: u32,
     #[validate(custom(function = "validate_url"))]
     pub url: Url,
     pub hash: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NRTM4SnapshotFileType {
+    Snapshot,
 }
 
 #[derive(Debug, Serialize, Deserialize, Validate)]
@@ -171,7 +178,7 @@ pub struct NRTM4UpdateNotificationFile {
     pub version: u32,
     pub timestamp: DateTime<Utc>,
     #[serde(rename = "type")]
-    pub file_type: String,
+    pub file_type: NRTM4SnapshotFileType,
     #[validate(nested)]
     pub snapshot: NRTM4FileReference,
     #[validate(nested)]
@@ -207,7 +214,7 @@ fn validate_unf(unf: &NRTM4UpdateNotificationFile) -> Result<(), ValidationError
     }
     Ok(())
 }
-// TODO: timestamp, delta v1, next key, type field in UNF, IRR object name
+// TODO: timestamp, next key, IRR object name
 fn is_contiguous_and_ordered(numbers: &[u32]) -> bool {
     if numbers.is_empty() {
         return true;
