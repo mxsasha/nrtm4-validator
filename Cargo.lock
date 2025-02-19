@@ -1037,7 +1037,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "nrtmv4-validator"
+name = "nrtm4-validator"
 version = "0.1.0"
 dependencies = [
  "anyhow",

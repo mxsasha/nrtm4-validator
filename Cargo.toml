@@ -1,9 +1,15 @@
 [package]
-name = "nrtmv4-validator"
+name = "nrtm4-validator"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+authors = ["Sasha Romijn <github@mxsasha.eu>"]
+license = "MIT"
+description = "A validator for draft-ietf-grow-nrtm-v4"
+readme = "README.md"
+homepage = "https://github.com/mxsasha/nrtm4-validator/"
+repository = "https://github.com/mxsasha/nrtm4-validator/"
+keywords = ["cli", "nrtmv4", "rpsl"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 tokio = { version = "1.36", features = ["full"] }
