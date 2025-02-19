@@ -1,6 +1,7 @@
 # nrtm4-validator
 
 This is a validator for [draft-ietf-grow-nrtm-v4](https://datatracker.ietf.org/doc/html/draft-ietf-grow-nrtm-v4) written in Rust.
+It can be useful in monitoring or supporting development.
 
 ## Usage
 
